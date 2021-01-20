@@ -19,16 +19,14 @@
 library(tidyverse)
 library(lubridate)
 library(xts)
+library(forecast)
 
 # Global Variables (Params)
 
 setParams <- function(productName = NA, frequencyTs = NA, startTs = NA){
-  # Buscar como volver esto un diccionario clave valor
-  # Asignamos los valores
-  
+  #https://stackoverflow.com/questions/22188660/r-time-series-modeling-on-weekly-data-using-ts-object
   # Funcion para establecer los parametros globales
   
-  # --- PARAMETROS
   # productName: nombre del producto
   # frequencyTs: periodicidad de la serie de tiempo
   # startTs: fecha de inicio de la serie de tiempo
@@ -39,48 +37,41 @@ setParams <- function(productName = NA, frequencyTs = NA, startTs = NA){
   return(list(product = product, frequency = frequency, start = start))
 }
 
-#Fuction
-globalParams <- setParams(productName = 'Curuba', frequencyTs = 52, startTs = c(2021, 1, 1))
+
 
 init <- function(globalParams){
-  # Validamos que hayan llegado todos los parametros obligatorios
   # Funcion para validar que hayan llegado todos los parametros
   
-  # --- PARAMETROS
   #globalParams: vector que contiene los parametros globales obligatorios
   #1. product, 2. frequency, 3. start
-  if(is.na(globalParams[1]) || is.na(globalParams[2]) || is.na(globalParams[3])){
+  
+  flag = FALSE
+  if(is.na(globalParams$product) || is.na(globalParams$frequency) || is.na(globalParams$start)){
     print('PARAR LA EJECUCION')
-    FALSE
+    flag = FALSE
   }else{
     print('Everything is ok! Has fun!')
+    flag = TRUE
   }
+  return(flag)
 }
-#Function
-init(globalParams = globalParams)
 
 
 # Load Data
 loadData <- function(){
   # Capturar con soap
   # Funcion para cargar los datos
-  data <- read_csv2('datasemanal.csv')
-  #ordenarlos
+  data <- read_csv2('datasemanal.csv', locale = locale(encoding = "Latin1"))
   data
 }
 
-#Fuction
-data <- loadData();
 
 # Filter Data
 filterData <- function(productName){
-  # Filtramos por nombre. Posteriormente cambiarlo por id, dado que el nombre puede cambiar levemente
+  # Filtramos por nombre.
   data <- data %>% filter(artiNombre == productName)
   data
 }
-
-#Function
-data <- filterData(globalParams[1])
 
 
 # Prepare Data
@@ -89,26 +80,48 @@ prepareData <- function(){
   data <- data %>% mutate(
     artiId = as.character(artiId),
     artiNombre = as.character(artiNombre),
-    fechaIni = lubridate::as_datetime(fechaIni),
+    fechaIni = lubridate::as_date(fechaIni),
     maximoKg = as.double(maximoKg),
     minimoKg = as.double(minimoKg),
     promedioKg = as.double(promedioKg)
   )
+  
+  #Sort 
+  data <- data %>% arrange(fechaIni)
   data
 }
 
-data <- prepareData()
-
 createTimeSeries <- function(target, globalParamsP){
   #target: variable objeto de estudio
-  data.ts <- ts(data[,target], start = c(2020,2,1), frequency = as.integer(globalParamsP[2]))
+  data.ts <- ts(data[,target], start = globalParamsP$start, frequency = globalParamsP$frequency)
   data.ts
 }
 
-#Function
+
+
+#Start
+globalParams <- setParams(productName = 'Queso costeño', frequencyTs = 365.25/7, startTs = decimal_date(ymd("2020-02-01")))
+
+if(init(globalParams = globalParams)){
+  data <- loadData()
+  data <- filterData(globalParams$product)
+  data <- prepareData()
+}else{
+  print('Some parameter is missing')
+}
+
+
+#REVISAR ESTO. DA PROBLEMA 
+#Da problema al mirar la periodicidad
+#Error in try.xts(x, error = "'x' needs to be timeBased or xtsible") : 
+#'x' needs to be timeBased or xtsible
 data.ts <- createTimeSeries(target = 'promedioKg', globalParamsP = globalParams)
 
+data.xts <- xts(data$promedioKg, order.by = data$fechaIni)
+
 periodicity(data.ts)
+plot(data.xts)
+decompose(data.ts)
 
 # split
 
@@ -117,11 +130,54 @@ percentage <- .3
 h <- round(length(data.ts) * percentage)
 th <- length(data.ts) - h
 
-train <- subset(x=data.ts, start = 1, end = th)
+#train <- subset(x=data.ts, start = 1, end = th)
 #periodicity(train)
-
-test <- subset(x=data.ts, start = th + 1, end = th + h)
+#test <- subset(x=data.ts, start = th + 1, end = th + h)
 #periodicity(test)
+
+train <- data.xts[1:th,]
+periodicity(train)
+
+test <- data.xts[(th+1):(th+h),]
+periodicity(test)
+
+
+mediaMovil <- function(window, orderP, hP){
+  fcst <- tail(forecast(ma(window, order = orderP), h = hP)$mean, 1)
+  return(fcst)
+}
+
+aa<-mediaMovil(train, 3,2)
+
+aa
+
+
+
+
+
+
+
+res <- auto.arima(train, max.p = 30, max.q = 30, ic = 'aic', stepwise = FALSE)
+
+
+
+
+
+arima.aic <- Arima(train, order = c(0,0,4))
+
+
+
+
+
+
+
+
+
+
+
+auto.arima(train, max.p = 30, max.q = 30, ic = 'bic', stepwise = FALSE)
+
+auto.arima(train, max.p = 30, max.q = 30, ic = 'aicc', stepwise = FALSE)
 
 
 
