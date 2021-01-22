@@ -13,6 +13,8 @@
 # * promedioKg: Precio promedio por kg
 
 
+###########################################     H DEBE SER UN PARAMS GLOBAL
+
 
 # Load libraries
 
@@ -23,8 +25,8 @@ library(forecast)
 
 # Global Variables (Params)
 
+
 setParams <- function(productName = NA, frequencyTs = NA, startTs = NA){
-  #https://stackoverflow.com/questions/22188660/r-time-series-modeling-on-weekly-data-using-ts-object
   # Funcion para establecer los parametros globales
   
   # productName: nombre del producto
@@ -98,6 +100,82 @@ createTimeSeries <- function(target, globalParamsP){
 }
 
 
+splitData <- function(data, percentage = .3){
+  #Funcion para cortar los datos
+  
+  #data: datos en formato ts o xts 
+  #percentage: porcentaje de datos a utilizar como test
+  
+  h <- round(length(data) * percentage)
+  th <- length(data.ts) - h
+  
+  train <- data.ts[1:th,]
+  test <- data.ts[(th+1):(th+h),]
+  return(list(train = train, test = test, h = h, th = th))
+}
+
+# 
+trainingModelsMoving <- function(h, th, data){
+  #Funcion para entrenar los modelos usando una ventana movil
+  
+  #h: tamaño del horizonte (cuantos periodos usamos como test)
+  #th: periodos en los datos de train
+  #data: todos los datos
+  suavizacionExponencialSimple <- NULL
+  suavizacionExponencialLineal <- NULL
+  holtWinterAditivo <- NULL
+  holtWinterMultiplicativo <- NULL
+  
+  for(i in 1:h){
+    ventana <- subset(data, start = 1, end = th - 1 + i)
+    
+    suavizacionExponencialSimple[i] <- ses(ventana, h = 1)$mean
+    suavizacionExponencialLineal[i] <- holt(ventana, h = 1)$mean
+    #holtWinterAditivo[i] <- hw(ventana, h = 1, seasonal = "additive")$mean
+    #holtWinterMultiplicativo[i] <- hw(ventana, h = 1, seasonal = "multiplicative")$mean
+  }
+  
+  return(list(
+    'suavizacionExponencialSimple' = suavizacionExponencialSimple,
+    'suavizacionExponencialLineal' = suavizacionExponencialLineal
+    #'holtWinterAditivo' = holtWinterAditivo,
+    #'holtWinterMultiplicativo' = holtWinterMultiplicativo,
+  ))
+}
+
+
+evaluateModels <- function(models, test){
+  # Funcion para evaluar el rendimiento de los modelos frente a los datos de test
+  
+  #models: lista de pronosticos de los modelos evaluados anteriormente
+  #test: datos de test
+  
+  metrics <- c("ME", "RMSE", "MAE", "MPE", "MAPE")
+  
+  r <- rbind(accuracy(models$suavizacionExponencialSimple, test)["Test set", metrics],
+             accuracy(models$suavizacionExponencialLineal, test)["Test set", metrics])
+  
+  metricas <- data.frame(r)
+  row.names(metricas) <- c("SES", "HOLT")
+  return(metricas)
+}
+
+compareModels <- fucntion(metrics){
+  #PARAMETRIZAR LA ELECCION DE LA METRICA
+  #Funcion para comparar los modelos previamente evaluados. Esta retorna el mejor modelo y su indice en el arr
+  
+  #metrics: dataframe que contiene todas las metricas de evaluacion de cada modelo
+  
+  #indexMetrics = list("ME" = 1, "RMSE" = 2, "MAE" = 3, "MPE" = 4, "MAPE" = 5)
+  indexMinValue <- which.min(metrics$RMSE)
+  bestModel <- metrics[indexMinValue,]
+  row.names(resultMetrics[indexMinValue,])
+  
+  return(list(bestModel = bestModel, indexMinValue = indexMinValue))
+}
+
+
+
 
 #Start
 globalParams <- setParams(productName = 'Queso costeño', frequencyTs = 365.25/7, startTs = decimal_date(ymd("2020-02-01")))
@@ -106,22 +184,46 @@ if(init(globalParams = globalParams)){
   data <- loadData()
   data <- filterData(globalParams$product)
   data <- prepareData()
+  
+  
+  # Mientras tanto
+  #lo de abajo reemplazarlo con createdataframe una vez se descargue full data y evitar el error
+  #data.ts <- xts(data$promedioKg, order.by = data$fechaIni)
+  data.ts <- xts(data$promedioKg, order.by = data$fechaIni)
+  splitDataResult <- splitData(data = data.ts, percentage = .3)
+  train <- splitDataResult$train
+  test <- splitDataResult$test
+  h <- splitDataResult$h
+  th <- splitDataResult$th
+  
+  results <- trainingModelsMoving(h, th, data.ts)
+  
+  resultMetrics <- evaluateModels(results, test)
+  
+  bestModelo <- compareModels(results)
+  
+  #percentage <- .3
+  #h <- round(length(data.ts) * percentage)
+  #th <- length(data.ts) - h
+  
+  
+  
 }else{
   print('Some parameter is missing')
+  #api.response(200, 'data is missing')
+  return(FALSE)
 }
-
 
 #REVISAR ESTO. DA PROBLEMA 
 #Da problema al mirar la periodicidad
 #Error in try.xts(x, error = "'x' needs to be timeBased or xtsible") : 
 #'x' needs to be timeBased or xtsible
-data.ts <- createTimeSeries(target = 'promedioKg', globalParamsP = globalParams)
+#data.ts <- createTimeSeries(target = 'promedioKg', globalParamsP = globalParams)
+data.ts <- xts(data$promedioKg, order.by = data$fechaIni)
 
-data.xts <- xts(data$promedioKg, order.by = data$fechaIni)
-
-periodicity(data.ts)
-plot(data.xts)
-decompose(data.ts)
+#periodicity(data.ts)
+#plot(data.xts)
+#decompose(data.ts)
 
 # split
 
@@ -135,23 +237,52 @@ th <- length(data.ts) - h
 #test <- subset(x=data.ts, start = th + 1, end = th + h)
 #periodicity(test)
 
-train <- data.xts[1:th,]
+
+
+train <- data.ts[1:th,]
 periodicity(train)
 
-test <- data.xts[(th+1):(th+h),]
+test <- data.ts[(th+1):(th+h),]
 periodicity(test)
 
 
-mediaMovil <- function(window, orderP, hP){
-  fcst <- tail(forecast(ma(window, order = orderP), h = hP)$mean, 1)
-  return(fcst)
+
+
+
+
+#Entrenar modelos con ventana movil
+
+
+results <- trainingModelsMoving(h, th, data.ts)
+results
+
+
+
+
+resultMetrics <- evaluateModels(results, test)
+
+which.min(resultMetrics$RMSE)
+row.names(resultMetrics[1,])
+
+
+compareModels <- fucntion(metrics){
+  #indexMetrics = list("ME" = 1, "RMSE" = 2, "MAE" = 3, "MPE" = 4, "MAPE" = 5)
+  indexMinValue <- which.min(metrics$RMSE)
+  bestModel <- metrics[indexMinValue,]
+  row.names(resultMetrics[indexMinValue,])
+  
+  return(list(bestModel = bestModel, indexMinValue = indexMinValue))
 }
 
-aa<-mediaMovil(train, 3,2)
-
-aa
+min(results[1:3])
 
 
+
+compareModels(results)
+
+results$suavizacionExponencialSimple[indexMetrics$RMSE]
+
+results[1]
 
 
 
@@ -183,4 +314,22 @@ auto.arima(train, max.p = 30, max.q = 30, ic = 'aicc', stepwise = FALSE)
 
 
 
+mediaMovil <- function(window, orderP, hP){
+  fcst <- tail(forecast(ma(window, order = orderP), h = hP)$mean, 1)
+  return(fcst)
+}
 
+aa<-mediaMovil(train, 3,2)
+
+aa
+
+
+
+
+# EXPERIMENT
+
+#https://robjhyndman.com/hyndsight/seasonal-periods/
+
+prueba <- msts(data.ts, seasonal.periods=c(365,25))
+               
+decompose(prueba)
