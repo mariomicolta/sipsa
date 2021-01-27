@@ -79,6 +79,7 @@ filterData <- function(productName){
 # Prepare Data
 
 prepareData <- function(){
+  #CAMBIAR
   data <- data %>% mutate(
     artiId = as.character(artiId),
     artiNombre = as.character(artiNombre),
@@ -174,11 +175,14 @@ compareModels <- fucntion(metrics){
   return(list(bestModel = bestModel, indexMinValue = indexMinValue))
 }
 
+# 
 
 
 
 #Start
-globalParams <- setParams(productName = 'Queso costeño', frequencyTs = 365.25/7, startTs = decimal_date(ymd("2020-02-01")))
+globalParams <- setParams(productName = 'Queso costeño', 
+                          frequencyTs = 365.25/7, 
+                          startTs = decimal_date(ymd("2020-02-01")))
 
 if(init(globalParams = globalParams)){
   data <- loadData()
