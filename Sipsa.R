@@ -161,7 +161,7 @@ evaluateModels <- function(models, test){
   return(metricas)
 }
 
-compareModels <- fucntion(metrics){
+compareModels <- function(metrics){
   #PARAMETRIZAR LA ELECCION DE LA METRICA
   #Funcion para comparar los modelos previamente evaluados. Esta retorna el mejor modelo y su indice en el arr
   
@@ -184,6 +184,11 @@ globalParams <- setParams(productName = 'Queso costeño',
                           frequencyTs = 365.25/7, 
                           startTs = decimal_date(ymd("2020-02-01")))
 
+productName = 'Queso costeño'
+frequencyTs = 365.25/7
+startTs = decimal_date(ymd("2020-02-01"))
+
+
 if(init(globalParams = globalParams)){
   data <- loadData()
   data <- filterData(globalParams$product)
@@ -204,7 +209,7 @@ if(init(globalParams = globalParams)){
   
   resultMetrics <- evaluateModels(results, test)
   
-  bestModelo <- compareModels(results)
+  bestModel <- compareModels(results)
   
   #percentage <- .3
   #h <- round(length(data.ts) * percentage)
