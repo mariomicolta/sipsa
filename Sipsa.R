@@ -66,7 +66,7 @@ prepareData <- function(){
 createTimeSeries <- function(target, start, frequency){
   #target: variable objeto de estudio
   data.ts <- ts(data[,target], start = c(year(start), month(start)), frequency = frequency)
-  data.ts
+  return(data.ts)
 }
 
 
@@ -233,7 +233,8 @@ bestModel <- compareModels(metrics)
 bestModel
 
 
-
+asda <- ses(data.ts, h = 4)
+asda
 
 
 attributes(comb_WA)
