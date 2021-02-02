@@ -143,14 +143,23 @@ evaluateModels <- function(models, test){
   #models: lista de pronosticos de los modelos evaluados anteriormente
   #test: datos de test
   
-  metrics <- c("ME", "RMSE", "MAE", "MPE", "MAPE")
+  metricsLabels <- c("ME", "RMSE", "MAE", "MPE", "MAPE")
   
-  r <- rbind(accuracy(models$suavizacionExponencialSimple, test)["Test set", metrics],
-             accuracy(models$suavizacionExponencialLineal, test)["Test set", metrics])
+  metrics <- rbind(accuracy(models$mediaMovil3, test)["Test set", metricsLabels],
+             accuracy(models$mediaMovil4, test)["Test set", metricsLabels],
+             accuracy(models$mediaMovil5, test)["Test set", metricsLabels],
+             accuracy(models$mediaMovil6, test)["Test set", metricsLabels],
+             accuracy(models$mediaMovil7, test)["Test set", metricsLabels],
+             accuracy(models$mediaMovil8, test)["Test set", metricsLabels],
+             accuracy(models$mediaMovil9, test)["Test set", metricsLabels],
+             accuracy(models$suavizacionExponencialSimple, test)["Test set", metricsLabels],
+             accuracy(models$suavizacionExponencialLineal, test)["Test set", metricsLabels],
+             accuracy(models$holtWinterAditivo, test)["Test set", metricsLabels],
+             accuracy(models$holtWinterMultiplicativo, test)["Test set", metricsLabels])
   
-  metricas <- data.frame(r)
-  row.names(metricas) <- c("SES", "HOLT")
-  return(metricas)
+  metrics <- data.frame(metrics)
+  row.names(metrics) <- c("M3", "M4", "M5", "M6", "M7", "M8", "M9", "SES", "HOLT", "HOLT-AD", "HOLT-MT")
+  return(metrics)
 }
 
 compareModels <- function(metrics){
@@ -162,10 +171,11 @@ compareModels <- function(metrics){
   #indexMetrics = list("ME" = 1, "RMSE" = 2, "MAE" = 3, "MPE" = 4, "MAPE" = 5)
   indexMinValue <- which.min(metrics$RMSE)
   bestModel <- metrics[indexMinValue,]
-  row.names(resultMetrics[indexMinValue,])
+  #row.names(metrics[indexMinValue,])
   
   return(list(bestModel = bestModel, indexMinValue = indexMinValue))
 }
+
 
 
 formatDate <- function(fecha){
@@ -212,13 +222,22 @@ h <- splitDataResult$h
 th <- splitDataResult$th # se puede sustituir con length(train)
 
 ptm <- proc.time()
-results <- trainingModelsMoving(h, th, data.ts)
+models <- trainingModelsMoving(h, th, data.ts)
 proc.time () - ptm
 
-  
-  resultMetrics <- evaluateModels(results, test)
-  
-  bestModel <- compareModels(results)
+
+metrics <- evaluateModels(models, test)
+
+bestModel <- compareModels(metrics)
+
+bestModel
+
+
+
+
+
+attributes(comb_WA)
+
   
   #percentage <- .3
   #h <- round(length(data.ts) * percentage)
