@@ -13,57 +13,26 @@
 # * promedioKg: Precio promedio por kg
 
 
-###########################################     H DEBE SER UN PARAMS GLOBAL
+###########################################
 
 
 # Load libraries
+
+#Para el formato de fechas en español Jan -> Ene
+Sys.setlocale(locale = "Spanish")
+set.seed(1234)
+
 
 library(tidyverse)
 library(lubridate)
 library(xts)
 library(forecast)
 
-# Global Variables (Params)
-
-
-setParams <- function(productName = NA, frequencyTs = NA, startTs = NA){
-  # Funcion para establecer los parametros globales
-  
-  # productName: nombre del producto
-  # frequencyTs: periodicidad de la serie de tiempo
-  # startTs: fecha de inicio de la serie de tiempo
-  product <- productName
-  frequency <- frequencyTs
-  start <- startTs
-  
-  return(list(product = product, frequency = frequency, start = start))
-}
-
-
-
-init <- function(globalParams){
-  # Funcion para validar que hayan llegado todos los parametros
-  
-  #globalParams: vector que contiene los parametros globales obligatorios
-  #1. product, 2. frequency, 3. start
-  
-  flag = FALSE
-  if(is.na(globalParams$product) || is.na(globalParams$frequency) || is.na(globalParams$start)){
-    print('PARAR LA EJECUCION')
-    flag = FALSE
-  }else{
-    print('Everything is ok! Has fun!')
-    flag = TRUE
-  }
-  return(flag)
-}
-
-
 # Load Data
-loadData <- function(){
+loadData <- function(pathFile = 'datamensual.csv'){
   # Capturar con soap
   # Funcion para cargar los datos
-  data <- read_csv2('datasemanal.csv', locale = locale(encoding = "Latin1"))
+  data <- read_csv2(pathFile, locale = locale(encoding = "Latin1"))
   data
 }
 
@@ -71,32 +40,32 @@ loadData <- function(){
 # Filter Data
 filterData <- function(productName){
   # Filtramos por nombre.
-  data <- data %>% filter(artiNombre == productName)
+  data <- data %>% filter(Producto == productName)
   data
 }
 
 
 # Prepare Data
-
 prepareData <- function(){
   #CAMBIAR
   data <- data %>% mutate(
-    artiId = as.character(artiId),
-    artiNombre = as.character(artiNombre),
-    fechaIni = lubridate::as_date(fechaIni),
-    maximoKg = as.double(maximoKg),
-    minimoKg = as.double(minimoKg),
-    promedioKg = as.double(promedioKg)
+    Fecha = formatDate(Fecha),
+    Grupo = as.character(Grupo),
+    Producto = as.character(Producto),
+    Mercado = as.character(Mercado),
+    precio = as.double(`Precio  por kilogramo`)
   )
   
+  data <- data[,-c(5)]
+  
   #Sort 
-  data <- data %>% arrange(fechaIni)
+  data <- data %>% arrange(Fecha)
   data
 }
 
-createTimeSeries <- function(target, globalParamsP){
+createTimeSeries <- function(target, start, frequency){
   #target: variable objeto de estudio
-  data.ts <- ts(data[,target], start = globalParamsP$start, frequency = globalParamsP$frequency)
+  data.ts <- ts(data[,target], start = c(year(start), month(start)), frequency = frequency)
   data.ts
 }
 
@@ -122,6 +91,14 @@ trainingModelsMoving <- function(h, th, data){
   #h: tamaño del horizonte (cuantos periodos usamos como test)
   #th: periodos en los datos de train
   #data: todos los datos
+  mediaMovil3 <- NULL
+  mediaMovil4 <- NULL
+  mediaMovil5 <- NULL
+  mediaMovil6 <- NULL
+  mediaMovil7 <- NULL
+  mediaMovil8 <- NULL
+  mediaMovil9 <- NULL
+
   suavizacionExponencialSimple <- NULL
   suavizacionExponencialLineal <- NULL
   holtWinterAditivo <- NULL
@@ -130,17 +107,32 @@ trainingModelsMoving <- function(h, th, data){
   for(i in 1:h){
     ventana <- subset(data, start = 1, end = th - 1 + i)
     
+    mediaMovil3[i] <- tail(forecast(ma(ventana , order = 3), h = 2)$mean, 1)
+    mediaMovil4[i] <- tail(forecast(ma(ventana , order = 4), h = 3)$mean, 1)
+    mediaMovil5[i] <- tail(forecast(ma(ventana , order = 5), h = 3)$mean, 1)
+    mediaMovil6[i] <- tail(forecast(ma(ventana , order = 6), h = 4)$mean, 1)
+    mediaMovil7[i] <- tail(forecast(ma(ventana , order = 7), h = 4)$mean, 1)
+    mediaMovil8[i] <- tail(forecast(ma(ventana , order = 8), h = 5)$mean, 1)
+    mediaMovil9[i] <- tail(forecast(ma(ventana , order = 9), h = 5)$mean, 1)
+    
     suavizacionExponencialSimple[i] <- ses(ventana, h = 1)$mean
     suavizacionExponencialLineal[i] <- holt(ventana, h = 1)$mean
-    #holtWinterAditivo[i] <- hw(ventana, h = 1, seasonal = "additive")$mean
-    #holtWinterMultiplicativo[i] <- hw(ventana, h = 1, seasonal = "multiplicative")$mean
+    holtWinterAditivo[i] <- hw(ventana, h = 1, seasonal = "additive")$mean
+    holtWinterMultiplicativo[i] <- hw(ventana, h = 1, seasonal = "multiplicative")$mean
   }
   
   return(list(
+    'mediaMovil3' = mediaMovil3,
+    'mediaMovil4' = mediaMovil4,
+    'mediaMovil5' = mediaMovil5,
+    'mediaMovil6' = mediaMovil6,
+    'mediaMovil7' = mediaMovil7,
+    'mediaMovil8' = mediaMovil8,
+    'mediaMovil9' = mediaMovil9,
     'suavizacionExponencialSimple' = suavizacionExponencialSimple,
-    'suavizacionExponencialLineal' = suavizacionExponencialLineal
-    #'holtWinterAditivo' = holtWinterAditivo,
-    #'holtWinterMultiplicativo' = holtWinterMultiplicativo,
+    'suavizacionExponencialLineal' = suavizacionExponencialLineal,
+    'holtWinterAditivo' = holtWinterAditivo,
+    'holtWinterMultiplicativo' = holtWinterMultiplicativo
   ))
 }
 
@@ -175,37 +167,54 @@ compareModels <- function(metrics){
   return(list(bestModel = bestModel, indexMinValue = indexMinValue))
 }
 
+
+formatDate <- function(fecha){
+  f <- lubridate::dmy(paste0("01-", fecha))
+  return(f)
+}
+
 # 
 
 
 
 #Start
-globalParams <- setParams(productName = 'Queso costeño', 
-                          frequencyTs = 365.25/7, 
-                          startTs = decimal_date(ymd("2020-02-01")))
+#globalParams <- setParams(productName = 'Queso costeño', 
+#                          frequencyTs = 365.25/7, 
+#                          startTs = decimal_date(ymd("2020-02-01")))
+
+
+start <- function(){
+  
+  # meter todo aki
+}
+
+data <- loadData(pathFile = 'datamensual.csv')
 
 productName = 'Queso costeño'
-frequencyTs = 365.25/7
-startTs = decimal_date(ymd("2020-02-01"))
+#frequencyTs = 365.25/7 #Semanal
+frequencyTs = 12
 
 
-if(init(globalParams = globalParams)){
-  data <- loadData()
-  data <- filterData(globalParams$product)
-  data <- prepareData()
+data <- filterData(productName = productName)
+#startTs = decimal_date(ymd("2020-02-01"))
+startTs <- formatDate(min(data$Fecha))
+data <- prepareData()
   
-  
-  # Mientras tanto
-  #lo de abajo reemplazarlo con createdataframe una vez se descargue full data y evitar el error
-  #data.ts <- xts(data$promedioKg, order.by = data$fechaIni)
-  data.ts <- xts(data$promedioKg, order.by = data$fechaIni)
-  splitDataResult <- splitData(data = data.ts, percentage = .3)
-  train <- splitDataResult$train
-  test <- splitDataResult$test
-  h <- splitDataResult$h
-  th <- splitDataResult$th
-  
-  results <- trainingModelsMoving(h, th, data.ts)
+data.ts <- createTimeSeries('precio', start = startTs, frequencyTs)
+
+#data.ts <- xts(data$promedioKg, order.by = data$fechaIni)
+
+splitDataResult <- splitData(data = data.ts, percentage = .3)
+
+train <- splitDataResult$train
+test <- splitDataResult$test
+h <- splitDataResult$h
+th <- splitDataResult$th # se puede sustituir con length(train)
+
+ptm <- proc.time()
+results <- trainingModelsMoving(h, th, data.ts)
+proc.time () - ptm
+
   
   resultMetrics <- evaluateModels(results, test)
   
@@ -215,13 +224,7 @@ if(init(globalParams = globalParams)){
   #h <- round(length(data.ts) * percentage)
   #th <- length(data.ts) - h
   
-  
-  
-}else{
-  print('Some parameter is missing')
-  #api.response(200, 'data is missing')
-  return(FALSE)
-}
+
 
 #REVISAR ESTO. DA PROBLEMA 
 #Da problema al mirar la periodicidad
@@ -333,6 +336,18 @@ aa<-mediaMovil(train, 3,2)
 aa
 
 
+
+paste0("01-", data$Fecha)
+
+parse_date("31 DICIEMBRE 2011","%d %B %Y",locale=locale("es"))
+
+
+
+
+
+
+# Error format fecha
+#https://stackoverflow.com/questions/53380650/b-y-date-conversion-gives-na
 
 
 # EXPERIMENT
