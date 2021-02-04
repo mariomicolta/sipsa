@@ -29,6 +29,8 @@ library(xts)
 library(forecast)
 library(tseries)
 library(rlist)
+library(ForecastComb)
+
 
 
 # Load Data
@@ -148,6 +150,60 @@ trainArima <- function(ic = 'aic', data){
 }
 
 
+# Da error
+trainPolynomial <- function(data, degree = 2){
+
+  significance_level <- 0.05
+  
+  #ERROR
+  # No reconoce los parámetros dentro de la función poly. Es decir, al parecer, se debe escribir directamente
+  #el grado del polinomio y no poner degree
+  model <- tslm(data ~ poly(trend, degree) + season, data = data)
+  
+  
+  # *** No autocorrelación
+  
+  # Prueba de rachas
+  runstest <- runs.test(factor(residuals(model) > 0))
+  
+  if(runstest$p.value < significance_level){
+    stop('Se rechaza la no autocorrelación')
+  }
+  
+  # Box pierce
+  boxPierceTable <- tableBoxPierceOrLjungBox(residuals(model))
+  minBoxPierce <- min(boxPierceTable['p-valor'])
+  maxBoxPierce <- max(boxPierceTable['p-valor'])
+  
+  if(minBoxPierce < significance_level){
+    stop('Se rechaza la no autocorrelación')
+  }
+  
+  # *** Homocedasticidad
+  
+  #Ljung-Box
+  ljungBoxTable <- tableBoxPierceOrLjungBox(residuals(model)^2, type = "Ljung-Box")
+  minLjungBox <- min(ljungBoxTable['p-valor'])
+  maxLjungBox <- max(ljungBoxTable['p-valor'])
+  
+  if(minLjungBox < significance_level){
+    stop('Se rechaza la homocedasticidad')
+  }
+  
+  # Normalidad
+  
+  testNormJarqueBera <- jarque.bera.test(residuals(model))
+  testNormShapiro <- shapiro.test(residuals(model))
+  
+  if(testNormJarqueBera$p.value < significance_level | testNormShapiro$p.value < significance_level){
+    stop('Se rechaza la normalidad de los residuos')
+  }
+  
+  return(list(flag = TRUE))
+  
+}
+
+
 trainingModelsMoving <- function(h, th, data, train){
   ptm <- proc.time()
   #Funcion para entrenar los modelos usando una ventana movil
@@ -160,6 +216,8 @@ trainingModelsMoving <- function(h, th, data, train){
   ordersArimaAIC <- trainArima(ic = 'aic', data = train)#organizar este train luego
   ordersArimaBIC <- trainArima(ic = 'bic', data = train)
   ordersArimaAICC <- trainArima(ic = 'aicc', data = train)
+  
+  polynomial2 <- trainPolynomial(degree = 2, data = train)
   
   arimaAIC <- NULL
   arimaBIC <- NULL
@@ -208,32 +266,33 @@ trainingModelsMoving <- function(h, th, data, train){
     holtWinterAditivo[i] <- hw(ventana, h = 1, seasonal = "additive")$mean
     holtWinterMultiplicativo[i] <- hw(ventana, h = 1, seasonal = "multiplicative")$mean
   }
+
   proc.time () - ptm
   
   # Estos modelos no requieren validacion, por lo tanto, entran sin compromiso
   lista <- list(
-    'mediaMovil3' = mediaMovil3,
-    'mediaMovil4' = mediaMovil4,
-    'mediaMovil5' = mediaMovil5,
-    'mediaMovil6' = mediaMovil6,
-    'mediaMovil7' = mediaMovil7,
-    'mediaMovil8' = mediaMovil8,
-    'mediaMovil9' = mediaMovil9,
-    'suavizacionExponencialSimple' = suavizacionExponencialSimple,
-    'suavizacionExponencialLineal' = suavizacionExponencialLineal,
-    'holtWinterAditivo' = holtWinterAditivo,
-    'holtWinterMultiplicativo' = holtWinterMultiplicativo)
+    'mediaMovil3' = list('name' = 'mediaMovil3', 'forecast' = mediaMovil3),
+    'mediaMovil4' = list('name' = 'mediaMovil4', 'forecast' = mediaMovil4),
+    'mediaMovil5' = list('name' = 'mediaMovil5', 'forecast' = mediaMovil5),
+    'mediaMovil6' = list('name' = 'mediaMovil6', 'forecast' = mediaMovil6),
+    'mediaMovil7' = list('name' = 'mediaMovil7', 'forecast' = mediaMovil7),
+    'mediaMovil8' = list('name' = 'mediaMovil8', 'forecast' = mediaMovil8),
+    'mediaMovil9' = list('name' = 'mediaMovil9', 'forecast' = mediaMovil9),
+    'suavizacionExponencialSimple' = list('name' = 'suavizacionExponencialSimple', 'forecast' = suavizacionExponencialSimple),
+    'suavizacionExponencialLineal' = list('name' = 'suavizacionExponencialLineal', 'forecast' = suavizacionExponencialLineal),
+    'holtWinterAditivo' = list('name' = 'holtWinterAditivo', 'forecast' = holtWinterAditivo),
+    'holtWinterMultiplicativo' = list('name' = 'holtWinterMultiplicativo', 'forecast' = holtWinterMultiplicativo))
     
   if(ordersArimaAIC$flag){
-    lista <- list.append(lista, 'arimaAIC' = arimaAIC)
+    lista <- list.append(lista, 'arimaAIC' = list('name' = 'arimaAIC', 'forecast' = arimaAIC))
   }
   
   if(ordersArimaBIC$flag){
-    lista <- list.append(lista, 'arimaBIC' = arimaBIC)
+    lista <- list.append(lista, 'arimaBIC' = list('name' = 'arimaBIC', 'forecast' = arimaBIC))
   }
   
   if(ordersArimaAICC$flag){
-    lista <- list.append(lista, 'arimaAICC' = arimaAICC)
+    lista <- list.append(lista, 'arimaAICC' = list('name' = 'arimaAICC', 'forecast' = arimaAICC))
   }
   
   
@@ -248,56 +307,24 @@ evaluateModels <- function(models, test){
   #test: datos de test
   
   metricsLabels <- c("ME", "RMSE", "MAE", "MPE", "MAPE")
+  metrics <- NULL
+  names <- NULL
   
-  metrics <- rbind(accuracy(models$arimaAIC, test)["Test set", metricsLabels],
-             accuracy(models$mediaMovil3, test)["Test set", metricsLabels],
-             accuracy(models$mediaMovil4, test)["Test set", metricsLabels],
-             accuracy(models$mediaMovil5, test)["Test set", metricsLabels],
-             accuracy(models$mediaMovil6, test)["Test set", metricsLabels],
-             accuracy(models$mediaMovil7, test)["Test set", metricsLabels],
-             accuracy(models$mediaMovil8, test)["Test set", metricsLabels],
-             accuracy(models$mediaMovil9, test)["Test set", metricsLabels],
-             accuracy(models$suavizacionExponencialSimple, test)["Test set", metricsLabels],
-             accuracy(models$suavizacionExponencialLineal, test)["Test set", metricsLabels],
-             accuracy(models$holtWinterAditivo, test)["Test set", metricsLabels],
-             accuracy(models$holtWinterMultiplicativo, test)["Test set", metricsLabels])
+  for (model in models){
+    acc <- accuracy(model$forecast, test)["Test set", metricsLabels]
+    metrics <- rbind(metrics, acc)
+    names <- rbind(names, model$name)
+  }
   
   metrics <- data.frame(metrics)
-  row.names(metrics) <- c("ARIMA-AIC","M3", "M4", "M5", "M6", "M7", "M8", "M9", "SES", "HOLT", "HOLT-AD", "HOLT-MT")
+  row.names(metrics) <- names
+  metrics <- cbind(metrics, names)
+  
   return(metrics)
 }
 
-evaluateModels2 <- function(models, test){
-  # Funcion para evaluar el rendimiento de los modelos frente a los datos de test
-  
-  #models: lista de pronosticos de los modelos evaluados anteriormente
-  #test: datos de test
-  
-  metricsLabels <- c("ME", "RMSE", "MAE", "MPE", "MAPE")
-  
-  for (model in models){
-    print(accuracy(model, test)["Test set", metricsLabels])
-    #print(model)
-  }
-  
-  
-  metrics <- rbind(accuracy(models$arimaAIC, test)["Test set", metricsLabels],
-                   accuracy(models$mediaMovil3, test)["Test set", metricsLabels],
-                   accuracy(models$mediaMovil4, test)["Test set", metricsLabels],
-                   accuracy(models$mediaMovil5, test)["Test set", metricsLabels],
-                   accuracy(models$mediaMovil6, test)["Test set", metricsLabels],
-                   accuracy(models$mediaMovil7, test)["Test set", metricsLabels],
-                   accuracy(models$mediaMovil8, test)["Test set", metricsLabels],
-                   accuracy(models$mediaMovil9, test)["Test set", metricsLabels],
-                   accuracy(models$suavizacionExponencialSimple, test)["Test set", metricsLabels],
-                   accuracy(models$suavizacionExponencialLineal, test)["Test set", metricsLabels],
-                   accuracy(models$holtWinterAditivo, test)["Test set", metricsLabels],
-                   accuracy(models$holtWinterMultiplicativo, test)["Test set", metricsLabels])
-  
-  metrics <- data.frame(metrics)
-  row.names(metrics) <- c("ARIMA-AIC","M3", "M4", "M5", "M6", "M7", "M8", "M9", "SES", "HOLT", "HOLT-AD", "HOLT-MT")
-  return(metrics)
-}
+
+
 
 compareModels <- function(metrics){
   #PARAMETRIZAR LA ELECCION DE LA METRICA
@@ -313,6 +340,9 @@ compareModels <- function(metrics){
   #return(list(bestModel = bestModel, indexMinValue = indexMinValue))
   return(bestModel)
 }
+metrics
+
+
 
 tableBoxPierceOrLjungBox <- function(residuo, maxLag = 20, type = "Box-Pierce"){
   # se crean objetos para guardar los resultados
@@ -383,24 +413,9 @@ th <- splitDataResult$th # se puede sustituir con length(train)
 
 models <- trainingModelsMoving(h, th, data.ts, train)
 
-models
-
-models$mediaMovil3
-
-
-
-
-
-for (model in models){
-  print(row.names(model))
-  #print(accuracy(model, test)["Test set", metricsLabels])
-  #print(model)
-}
-
-#
-
 
 metrics <- evaluateModels(models, test)
+
 
 bestModel <- compareModels(metrics)
 
@@ -413,193 +428,119 @@ bestModel
 
 
 
-
-
-#Automatizacion arima
-
-
-ar <- trainArima(ic = 'aic', data = train)
-ar
-
-arima <- auto.arima(train, max.p = 30, max.q = 30, ic = 'aic', stepwise = FALSE)
-#(0,1,3)
-arima
-
-
-orders <- data.frame(as.list(arimaorder(arimaAic)))
-orders
-
-model <- Arima(train, order = c(orders$p, orders$d, orders$q))
-model
-
-#no autocorrelación
-#prueba de rachas
-runstest <- runs.test(factor(residuals(model) > 0))
-runstest$p.value
-
-#box pierce
-boxPierceTable <- tableBoxPierceOrLjungBox(residuals(model))
-
-minBoxPierce <- min(boxPierceTable['p-valor'])
-maxBoxPierce <- max(boxPierceTable['p-valor'])
-
-#Homocedasticidad
-
-ljungBoxTable <- tableBoxPierceOrLjungBox(residuals(model)^2, type = "Ljung-Box")
-
-minLjungBox <- min(ljungBoxTable['p-valor'])
-maxLjungBox <- max(ljungBoxTable['p-valor'])
-
-
-#Normalidad
-
-testNormJarqueBera <- jarque.bera.test(residuals(model))$p.value
-
-testNormShapiro <- shapiro.test(residuals(model))$p.value
-
-
-
-
-
+# Ensambles
+trainEnsambles <- function(data, train){
+  ptm <- proc.time()
+  
+  
+  arimaAIC <- NULL
+  arimaBIC <- NULL
+  arimaAICC <- NULL
+  
+  mediaMovil3 <- NULL
+  mediaMovil4 <- NULL
+  mediaMovil5 <- NULL
+  mediaMovil6 <- NULL
+  mediaMovil7 <- NULL
+  mediaMovil8 <- NULL
+  mediaMovil9 <- NULL
+  
+  suavizacionExponencialSimple <- NULL
+  suavizacionExponencialLineal <- NULL
+  holtWinterAditivo <- NULL
+  holtWinterMultiplicativo <- NULL
+  
+  
+  mediaMovil3 <- ma(data, order = 3)
+  mediaMovil3[length(mediaMovil3)] <- forecast(ma(train, order = 3), h=2)$mean
+  
+  suavizacionExponencialSimple <- ses(data)$fitted
+  suavizacionExponencialLineal <- holt(data)$fitted
+  holtWinterAditivo <- hw(data, seasonal = 'additive')$fitted
+  holtWinterMultiplicativo <- hw(data, seasonal = 'multiplicative')$fitted
+  
+  arima <- Arima(data.ts, order = c(2,2,3))$fitted
+  
+  inSample <- cbind(mediaMovil3, 
+                    suavizacionExponencialSimple, 
+                    suavizacionExponencialLineal, 
+                    holtWinterAditivo, 
+                    holtWinterMultiplicativo,
+                    arima)
+  inSample
+  
+  dataComb <- foreccomb(observed_vector = data, prediction_matrix = inSample, newobs = data,
+                        newpreds = inSample)
 
   
-  #percentage <- .3
-  #h <- round(length(data.ts) * percentage)
-  #th <- length(data.ts) - h
+  # *** MÉTODOS SIMPLES
+  comb_SA <- rolling_combine(dataComb, comb_method ="comb_SA")
+  comb_MED <- rolling_combine(dataComb, comb_method ="comb_MED")
+  comb_TA <- rolling_combine(dataComb, comb_method ="comb_TA")
+  comb_WA <- rolling_combine(dataComb, comb_method ="comb_WA")
+
+  # MÉTODOS BASADOS EN REGRESIÓN
+  comb_OLS <- rolling_combine(dataComb, comb_method ="comb_OLS")
+  comb_LAD <- rolling_combine(dataComb, comb_method ="comb_LAD")
+  comb_CLS <- rolling_combine(dataComb, comb_method ="comb_CLS")
   
-
-
-#REVISAR ESTO. DA PROBLEMA 
-#Da problema al mirar la periodicidad
-#Error in try.xts(x, error = "'x' needs to be timeBased or xtsible") : 
-#'x' needs to be timeBased or xtsible
-#data.ts <- createTimeSeries(target = 'promedioKg', globalParamsP = globalParams)
-data.ts <- xts(data$promedioKg, order.by = data$fechaIni)
-
-#periodicity(data.ts)
-#plot(data.xts)
-#decompose(data.ts)
-
-# split
-
-percentage <- .3
-
-h <- round(length(data.ts) * percentage)
-th <- length(data.ts) - h
-
-#train <- subset(x=data.ts, start = 1, end = th)
-#periodicity(train)
-#test <- subset(x=data.ts, start = th + 1, end = th + h)
-#periodicity(test)
-
-
-
-train <- data.ts[1:th,]
-periodicity(train)
-
-test <- data.ts[(th+1):(th+h),]
-periodicity(test)
-
-
-
-
-
-
-
-
-
-#Entrenar modelos con ventana movil
-
-
-results <- trainingModelsMoving(h, th, data.ts)
-results
-
-
-
-
-resultMetrics <- evaluateModels(results, test)
-
-which.min(resultMetrics$RMSE)
-row.names(resultMetrics[1,])
-
-
-compareModels <- fucntion(metrics){
-  #indexMetrics = list("ME" = 1, "RMSE" = 2, "MAE" = 3, "MPE" = 4, "MAPE" = 5)
-  indexMinValue <- which.min(metrics$RMSE)
-  bestModel <- metrics[indexMinValue,]
-  row.names(resultMetrics[indexMinValue,])
+  proc.time () - ptm
   
-  return(list(bestModel = bestModel, indexMinValue = indexMinValue))
+  
+  # Test
+  
+  metricsLabels <- c("ME", "RMSE", "MAE", "MPE", "MAPE")
+  names <- c('comb_SA', 'comb_MED', 'comb_TA', 'comb_WA', 'comb_OLS', 'comb_LAD', 'comb_CLS')
+  metrics <- rbind(comb_SA$Accuracy_Test["Test set", metricsLabels],
+                   comb_MED$Accuracy_Test["Test set", metricsLabels],
+                   comb_TA$Accuracy_Test["Test set", metricsLabels],
+                   comb_WA$Accuracy_Test["Test set", metricsLabels],
+                   comb_OLS$Accuracy_Test["Test set", metricsLabels],
+                   comb_LAD$Accuracy_Test["Test set", metricsLabels],
+                   comb_CLS$Accuracy_Test["Test set", metricsLabels])
+  
+  
+  metrics <- data.frame(metrics)
+  row.names(metrics) <- names
+  metrics <- cbind(metrics, names)
+  
+  return(metrics)
+  
 }
 
-min(results[1:3])
+dataComb <- trainandTestEnsambles(data.ts, train)
+dataComb
+
+
+# *** MÉTODOS SIMPLES
+comb_SA <- rolling_combine(dataComb, comb_method ="comb_SA")
+comb_MED <- rolling_combine(dataComb, comb_method ="comb_MED")
+comb_TA <- rolling_combine(dataComb, comb_method ="comb_TA")
+comb_WA <- rolling_combine(dataComb, comb_method ="comb_WA")
+#comb_BG <- rolling_combine(dataComb, comb_method ="comb_BG") #longitud de la serie-temporal/vector incompatible
+#comb_NG <- rolling_combine(dataComb, comb_method ="comb_NG") #longitud de la serie-temporal/vector incompatible
+#comb_InvW <- rolling_combine(dataComb, comb_method ="comb_InvW") #longitud de la serie-temporal/vector incompatible
+
+# MÉTODOS BASADOS EN REGRESIÓN
+comb_OLS <- rolling_combine(dataComb, comb_method ="comb_OLS")
+comb_LAD <- rolling_combine(dataComb, comb_method ="comb_LAD")
+comb_CLS <- rolling_combine(dataComb, comb_method ="comb_CLS")
+#comb_CSR <- rolling_combine(dataComb, comb_method ="comb_CSR") #Error: Rolling Forecast Combination method is not available for Complete Subset Regression
+
+# MÉTODOS BASADOS EN VECTORES PROPIOS
+#comb_EIG1 <- rolling_combine(dataComb, comb_method ="comb_EIG1") #Error in `-.default`(observed_vector, prediction_matrix) : longitud de la serie-temporal/vector incompatible
+#comb_EIG2 <- rolling_combine(dataComb, comb_method ="comb_EIG2")
+#comb_EIG3 <- rolling_combine(dataComb, comb_method ="comb_EIG3")
+#comb_EIG4 <- rolling_combine(dataComb, comb_method ="comb_EIG4")
+
+comb_SA$Accuracy_Test["Test set", ]
+comb_MED$Accuracy_Test["Test set", "RMSE"]
+comb_TA$Accuracy_Test["Test set", "RMSE"]
+comb_WA$Accuracy_Test["Test set", "RMSE"]
+
+comb_OLS$Accuracy_Test["Test set", "RMSE"]
+comb_LAD$Accuracy_Test["Test set", "RMSE"]
+comb_CLS$Accuracy_Test["Test set", "RMSE"]
 
 
 
-compareModels(results)
-
-results$suavizacionExponencialSimple[indexMetrics$RMSE]
-
-results[1]
-
-
-
-
-
-res <- auto.arima(train, max.p = 30, max.q = 30, ic = 'aic', stepwise = FALSE)
-
-
-
-
-
-arima.aic <- Arima(train, order = c(0,0,4))
-
-
-
-
-
-
-
-
-
-
-
-auto.arima(train, max.p = 30, max.q = 30, ic = 'bic', stepwise = FALSE)
-
-auto.arima(train, max.p = 30, max.q = 30, ic = 'aicc', stepwise = FALSE)
-
-
-
-
-
-mediaMovil <- function(window, orderP, hP){
-  fcst <- tail(forecast(ma(window, order = orderP), h = hP)$mean, 1)
-  return(fcst)
-}
-
-aa<-mediaMovil(train, 3,2)
-
-aa
-
-
-
-paste0("01-", data$Fecha)
-
-parse_date("31 DICIEMBRE 2011","%d %B %Y",locale=locale("es"))
-
-
-
-
-
-
-# Error format fecha
-#https://stackoverflow.com/questions/53380650/b-y-date-conversion-gives-na
-
-
-# EXPERIMENT
-
-#https://robjhyndman.com/hyndsight/seasonal-periods/
-
-prueba <- msts(data.ts, seasonal.periods=c(365,25))
-               
-decompose(prueba)
