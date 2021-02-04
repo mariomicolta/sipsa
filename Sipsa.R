@@ -158,12 +158,12 @@ trainingModelsMoving <- function(h, th, data, train){
   
   
   ordersArimaAIC <- trainArima(ic = 'aic', data = train)#organizar este train luego
-  #ordersArimaBIC <- trainArima(ic = 'bic', data = train)
-  #ordersArimaAICC <- trainArima(ic = 'aicc', data = train)
+  ordersArimaBIC <- trainArima(ic = 'bic', data = train)
+  ordersArimaAICC <- trainArima(ic = 'aicc', data = train)
   
   arimaAIC <- NULL
   arimaBIC <- NULL
-  arimaAIC <- NULL
+  arimaAICC <- NULL
   
   mediaMovil3 <- NULL
   mediaMovil4 <- NULL
@@ -183,6 +183,14 @@ trainingModelsMoving <- function(h, th, data, train){
     
     if(ordersArimaAIC$flag){
       arimaAIC[i] <- forecast(Arima(ventana, order = c(ordersArimaAIC$p, ordersArimaAIC$d, ordersArimaAIC$q)), h = 1)$mean
+    }
+    
+    if(ordersArimaBIC$flag){
+      arimaBIC[i] <- forecast(Arima(ventana, order = c(ordersArimaBIC$p, ordersArimaBIC$d, ordersArimaBIC$q)), h = 1)$mean
+    }
+    
+    if(ordersArimaAICC$flag){
+      arimaAICC[i] <- forecast(Arima(ventana, order = c(ordersArimaAICC$p, ordersArimaAICC$d, ordersArimaAICC$q)), h = 1)$mean
     }
     
     
@@ -217,11 +225,19 @@ trainingModelsMoving <- function(h, th, data, train){
     'holtWinterMultiplicativo' = holtWinterMultiplicativo)
     
   if(ordersArimaAIC$flag){
-    list.append(lista, 'arimaAIC' = arimaAIC)
+    lista <- list.append(lista, 'arimaAIC' = arimaAIC)
+  }
+  
+  if(ordersArimaBIC$flag){
+    lista <- list.append(lista, 'arimaBIC' = arimaBIC)
+  }
+  
+  if(ordersArimaAICC$flag){
+    lista <- list.append(lista, 'arimaAICC' = arimaAICC)
   }
   
   
-  return(list)
+  return(lista)
 }
 
 
@@ -245,6 +261,38 @@ evaluateModels <- function(models, test){
              accuracy(models$suavizacionExponencialLineal, test)["Test set", metricsLabels],
              accuracy(models$holtWinterAditivo, test)["Test set", metricsLabels],
              accuracy(models$holtWinterMultiplicativo, test)["Test set", metricsLabels])
+  
+  metrics <- data.frame(metrics)
+  row.names(metrics) <- c("ARIMA-AIC","M3", "M4", "M5", "M6", "M7", "M8", "M9", "SES", "HOLT", "HOLT-AD", "HOLT-MT")
+  return(metrics)
+}
+
+evaluateModels2 <- function(models, test){
+  # Funcion para evaluar el rendimiento de los modelos frente a los datos de test
+  
+  #models: lista de pronosticos de los modelos evaluados anteriormente
+  #test: datos de test
+  
+  metricsLabels <- c("ME", "RMSE", "MAE", "MPE", "MAPE")
+  
+  for (model in models){
+    print(accuracy(model, test)["Test set", metricsLabels])
+    #print(model)
+  }
+  
+  
+  metrics <- rbind(accuracy(models$arimaAIC, test)["Test set", metricsLabels],
+                   accuracy(models$mediaMovil3, test)["Test set", metricsLabels],
+                   accuracy(models$mediaMovil4, test)["Test set", metricsLabels],
+                   accuracy(models$mediaMovil5, test)["Test set", metricsLabels],
+                   accuracy(models$mediaMovil6, test)["Test set", metricsLabels],
+                   accuracy(models$mediaMovil7, test)["Test set", metricsLabels],
+                   accuracy(models$mediaMovil8, test)["Test set", metricsLabels],
+                   accuracy(models$mediaMovil9, test)["Test set", metricsLabels],
+                   accuracy(models$suavizacionExponencialSimple, test)["Test set", metricsLabels],
+                   accuracy(models$suavizacionExponencialLineal, test)["Test set", metricsLabels],
+                   accuracy(models$holtWinterAditivo, test)["Test set", metricsLabels],
+                   accuracy(models$holtWinterMultiplicativo, test)["Test set", metricsLabels])
   
   metrics <- data.frame(metrics)
   row.names(metrics) <- c("ARIMA-AIC","M3", "M4", "M5", "M6", "M7", "M8", "M9", "SES", "HOLT", "HOLT-AD", "HOLT-MT")
@@ -336,6 +384,21 @@ th <- splitDataResult$th # se puede sustituir con length(train)
 models <- trainingModelsMoving(h, th, data.ts, train)
 
 models
+
+models$mediaMovil3
+
+
+
+
+
+for (model in models){
+  print(row.names(model))
+  #print(accuracy(model, test)["Test set", metricsLabels])
+  #print(model)
+}
+
+#
+
 
 metrics <- evaluateModels(models, test)
 
