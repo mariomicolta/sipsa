@@ -27,13 +27,16 @@ library(tidyverse)
 library(lubridate)
 library(xts)
 library(forecast)
+library(tseries)
+library(rlist)
+
 
 # Load Data
 loadData <- function(pathFile = 'datamensual.csv'){
   # Capturar con soap
   # Funcion para cargar los datos
   data <- read_csv2(pathFile, locale = locale(encoding = "Latin1"))
-  data
+  return(data)
 }
 
 
@@ -41,7 +44,12 @@ loadData <- function(pathFile = 'datamensual.csv'){
 filterData <- function(productName){
   # Filtramos por nombre.
   data <- data %>% filter(Producto == productName)
-  data
+  return(data)
+}
+
+formatDate <- function(fecha){
+  f <- lubridate::dmy(paste0("01-", fecha))
+  return(f)
 }
 
 
@@ -60,7 +68,7 @@ prepareData <- function(){
   
   #Sort 
   data <- data %>% arrange(Fecha)
-  data
+  return(data)
 }
 
 createTimeSeries <- function(target, start, frequency){
@@ -79,18 +87,84 @@ splitData <- function(data, percentage = .3){
   h <- round(length(data) * percentage)
   th <- length(data.ts) - h
   
-  train <- data.ts[1:th,]
-  test <- data.ts[(th+1):(th+h),]
+  #train <- data.ts[1:th,]
+  #test <- data.ts[(th+1):(th+h),]
+  train <- subset(data.ts, start = 1, end = th)
+  test <- subset(data.ts, start = th + 1, end = th + h)
+  
   return(list(train = train, test = test, h = h, th = th))
 }
 
-# 
-trainingModelsMoving <- function(h, th, data){
+
+trainArima <- function(ic = 'aic', data){
+  #ic = ('aic', 'bic', 'aicc')
+  significance_level <- 0.05
+  
+  arima <- auto.arima(y = data, max.p = 30, max.q = 30, ic = ic, stepwise = FALSE)
+  orders <- data.frame(as.list(arimaorder(arima)))
+  
+  model <- Arima(train, order = c(orders$p, orders$d, orders$q))
+  
+  # *** No autocorrelación
+  
+  # Prueba de rachas
+  runstest <- runs.test(factor(residuals(model) > 0))
+  
+  if(runstest$p.value < significance_level){
+    stop('Se rechaza la no autocorrelación')
+  }
+  
+  # Box pierce
+  boxPierceTable <- tableBoxPierceOrLjungBox(residuals(model))
+  minBoxPierce <- min(boxPierceTable['p-valor'])
+  maxBoxPierce <- max(boxPierceTable['p-valor'])
+  
+  if(minBoxPierce < significance_level){
+    stop('Se rechaza la no autocorrelación')
+  }
+  
+  # *** Homocedasticidad
+  
+  #Ljung-Box
+  ljungBoxTable <- tableBoxPierceOrLjungBox(residuals(model)^2, type = "Ljung-Box")
+  minLjungBox <- min(ljungBoxTable['p-valor'])
+  maxLjungBox <- max(ljungBoxTable['p-valor'])
+  
+  if(minLjungBox < significance_level){
+    stop('Se rechaza la homocedasticidad')
+  }
+  
+  # Normalidad
+  
+  testNormJarqueBera <- jarque.bera.test(residuals(model))
+  testNormShapiro <- shapiro.test(residuals(model))
+  
+  if(testNormJarqueBera$p.value < significance_level | testNormShapiro$p.value < significance_level){
+    stop('Se rechaza la normalidad de los residuos')
+  }
+  
+  return(list(flag = TRUE, p = orders$p, d = orders$d, q = orders$q))
+
+}
+
+
+trainingModelsMoving <- function(h, th, data, train){
+  ptm <- proc.time()
   #Funcion para entrenar los modelos usando una ventana movil
   
   #h: tamaño del horizonte (cuantos periodos usamos como test)
   #th: periodos en los datos de train
   #data: todos los datos
+  
+  
+  ordersArimaAIC <- trainArima(ic = 'aic', data = train)#organizar este train luego
+  #ordersArimaBIC <- trainArima(ic = 'bic', data = train)
+  #ordersArimaAICC <- trainArima(ic = 'aicc', data = train)
+  
+  arimaAIC <- NULL
+  arimaBIC <- NULL
+  arimaAIC <- NULL
+  
   mediaMovil3 <- NULL
   mediaMovil4 <- NULL
   mediaMovil5 <- NULL
@@ -107,6 +181,11 @@ trainingModelsMoving <- function(h, th, data){
   for(i in 1:h){
     ventana <- subset(data, start = 1, end = th - 1 + i)
     
+    if(ordersArimaAIC$flag){
+      arimaAIC[i] <- forecast(Arima(ventana, order = c(ordersArimaAIC$p, ordersArimaAIC$d, ordersArimaAIC$q)), h = 1)$mean
+    }
+    
+    
     mediaMovil3[i] <- tail(forecast(ma(ventana , order = 3), h = 2)$mean, 1)
     mediaMovil4[i] <- tail(forecast(ma(ventana , order = 4), h = 3)$mean, 1)
     mediaMovil5[i] <- tail(forecast(ma(ventana , order = 5), h = 3)$mean, 1)
@@ -117,11 +196,14 @@ trainingModelsMoving <- function(h, th, data){
     
     suavizacionExponencialSimple[i] <- ses(ventana, h = 1)$mean
     suavizacionExponencialLineal[i] <- holt(ventana, h = 1)$mean
+    
     holtWinterAditivo[i] <- hw(ventana, h = 1, seasonal = "additive")$mean
     holtWinterMultiplicativo[i] <- hw(ventana, h = 1, seasonal = "multiplicative")$mean
   }
+  proc.time () - ptm
   
-  return(list(
+  # Estos modelos no requieren validacion, por lo tanto, entran sin compromiso
+  lista <- list(
     'mediaMovil3' = mediaMovil3,
     'mediaMovil4' = mediaMovil4,
     'mediaMovil5' = mediaMovil5,
@@ -132,8 +214,14 @@ trainingModelsMoving <- function(h, th, data){
     'suavizacionExponencialSimple' = suavizacionExponencialSimple,
     'suavizacionExponencialLineal' = suavizacionExponencialLineal,
     'holtWinterAditivo' = holtWinterAditivo,
-    'holtWinterMultiplicativo' = holtWinterMultiplicativo
-  ))
+    'holtWinterMultiplicativo' = holtWinterMultiplicativo)
+    
+  if(ordersArimaAIC$flag){
+    list.append(lista, 'arimaAIC' = arimaAIC)
+  }
+  
+  
+  return(list)
 }
 
 
@@ -145,7 +233,8 @@ evaluateModels <- function(models, test){
   
   metricsLabels <- c("ME", "RMSE", "MAE", "MPE", "MAPE")
   
-  metrics <- rbind(accuracy(models$mediaMovil3, test)["Test set", metricsLabels],
+  metrics <- rbind(accuracy(models$arimaAIC, test)["Test set", metricsLabels],
+             accuracy(models$mediaMovil3, test)["Test set", metricsLabels],
              accuracy(models$mediaMovil4, test)["Test set", metricsLabels],
              accuracy(models$mediaMovil5, test)["Test set", metricsLabels],
              accuracy(models$mediaMovil6, test)["Test set", metricsLabels],
@@ -158,7 +247,7 @@ evaluateModels <- function(models, test){
              accuracy(models$holtWinterMultiplicativo, test)["Test set", metricsLabels])
   
   metrics <- data.frame(metrics)
-  row.names(metrics) <- c("M3", "M4", "M5", "M6", "M7", "M8", "M9", "SES", "HOLT", "HOLT-AD", "HOLT-MT")
+  row.names(metrics) <- c("ARIMA-AIC","M3", "M4", "M5", "M6", "M7", "M8", "M9", "SES", "HOLT", "HOLT-AD", "HOLT-MT")
   return(metrics)
 }
 
@@ -173,15 +262,31 @@ compareModels <- function(metrics){
   bestModel <- metrics[indexMinValue,]
   #row.names(metrics[indexMinValue,])
   
-  return(list(bestModel = bestModel, indexMinValue = indexMinValue))
+  #return(list(bestModel = bestModel, indexMinValue = indexMinValue))
+  return(bestModel)
 }
 
+tableBoxPierceOrLjungBox <- function(residuo, maxLag = 20, type = "Box-Pierce"){
+  # se crean objetos para guardar los resultados
+  estadistico <- matrix(0, maxLag, 1)
+  pvalue <- matrix(0, maxLag, 1)
+  # se calcula la prueba para los diferentes rezagos
+  for (i in 1:maxLag) {
+    test <- Box.test(residuo, lag = i, type = type)
+    estadistico[i] <- test$statistic
+    pvalue[i] <- round(test$p.value, 5)
+  }
+  labels <- c("Rezagos", type, "p-valor")
+  tableBody <- cbind(matrix(1:maxLag, maxLag, 1), estadistico, pvalue)
+  #TABLABP <- data.frame(tableBody)
+  table <- data.frame(tableBody)
+  names(table) <- labels
+  return(table)
+}    
 
 
-formatDate <- function(fecha){
-  f <- lubridate::dmy(paste0("01-", fecha))
-  return(f)
-}
+
+
 
 # 
 
@@ -194,9 +299,15 @@ formatDate <- function(fecha){
 
 
 start <- function(){
+  set.seed(1234)
+  ptm <- proc.time()
   
   # meter todo aki
+  
+  proc.time() - ptm
 }
+
+
 
 data <- loadData(pathFile = 'datamensual.csv')
 
@@ -208,11 +319,12 @@ frequencyTs = 12
 data <- filterData(productName = productName)
 #startTs = decimal_date(ymd("2020-02-01"))
 startTs <- formatDate(min(data$Fecha))
+
+startTs
+
 data <- prepareData()
   
-data.ts <- createTimeSeries('precio', start = startTs, frequencyTs)
-
-#data.ts <- xts(data$promedioKg, order.by = data$fechaIni)
+data.ts <- createTimeSeries('precio', start = startTs, frequency = frequencyTs)
 
 splitDataResult <- splitData(data = data.ts, percentage = .3)
 
@@ -221,23 +333,71 @@ test <- splitDataResult$test
 h <- splitDataResult$h
 th <- splitDataResult$th # se puede sustituir con length(train)
 
-ptm <- proc.time()
-models <- trainingModelsMoving(h, th, data.ts)
-proc.time () - ptm
+models <- trainingModelsMoving(h, th, data.ts, train)
 
+models
 
 metrics <- evaluateModels(models, test)
 
 bestModel <- compareModels(metrics)
 
 bestModel
+# Pasar este best model a una función que con varios if o casewhen
+#trainModelA()
+#Al final el restulado lo ploteamos y devolvemos toda la data de inter[es]
 
 
-asda <- ses(data.ts, h = 4)
-asda
 
 
-attributes(comb_WA)
+
+
+
+#Automatizacion arima
+
+
+ar <- trainArima(ic = 'aic', data = train)
+ar
+
+arima <- auto.arima(train, max.p = 30, max.q = 30, ic = 'aic', stepwise = FALSE)
+#(0,1,3)
+arima
+
+
+orders <- data.frame(as.list(arimaorder(arimaAic)))
+orders
+
+model <- Arima(train, order = c(orders$p, orders$d, orders$q))
+model
+
+#no autocorrelación
+#prueba de rachas
+runstest <- runs.test(factor(residuals(model) > 0))
+runstest$p.value
+
+#box pierce
+boxPierceTable <- tableBoxPierceOrLjungBox(residuals(model))
+
+minBoxPierce <- min(boxPierceTable['p-valor'])
+maxBoxPierce <- max(boxPierceTable['p-valor'])
+
+#Homocedasticidad
+
+ljungBoxTable <- tableBoxPierceOrLjungBox(residuals(model)^2, type = "Ljung-Box")
+
+minLjungBox <- min(ljungBoxTable['p-valor'])
+maxLjungBox <- max(ljungBoxTable['p-valor'])
+
+
+#Normalidad
+
+testNormJarqueBera <- jarque.bera.test(residuals(model))$p.value
+
+testNormShapiro <- shapiro.test(residuals(model))$p.value
+
+
+
+
+
 
   
   #percentage <- .3
@@ -276,6 +436,9 @@ periodicity(train)
 
 test <- data.ts[(th+1):(th+h),]
 periodicity(test)
+
+
+
 
 
 
